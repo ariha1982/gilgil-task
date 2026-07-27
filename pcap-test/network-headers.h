@@ -21,14 +21,7 @@ struct eth_hdr
  */
 struct ipv4_hdr
 {
-#if (LIBNET_LIL_ENDIAN)
-    uint8_t ip_hl:4,      /* header length */
-           ip_v:4;         /* version */
-#endif
-#if (LIBNET_BIG_ENDIAN)
-    uint8_t ip_v:4,       /* version */
-           ip_hl:4;        /* header length */
-#endif
+    uint8_t ip_vhl;       /* 상위 4비트: version, 하위 4비트: IHL */ 
     uint8_t ip_tos;       /* type of service */
 #ifndef IPTOS_LOWDELAY
 #define IPTOS_LOWDELAY      0x10
