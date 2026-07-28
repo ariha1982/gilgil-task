@@ -5,22 +5,27 @@
 #include <netinet/in.h>
 
 #define IPv4_ETHERTYPE 0x0800
-#define ARP_ETHERTYPE 0x0806
-#define IPv6_ETHERTYPE 0x86DD
 #define TCP_PROTOCOL 0x06
-#define UDP_PROTOCOL 0x11
+#define IPv4_MIN_SIZE 20
+#define TCP_MIN_SIZE 20
 
 void usage() {
 	printf("syntax: pcap-test <interface>\n");
 	printf("sample: pcap-test wlan0\n");
 }
 
+struct parsing_result {
+	int *parsed_eth;
+	int *parsed_ip;
+	int *parsed_tcp;
+	int *payload;
+};
+
 struct ip_result
 {
 	bool success;
 	uint8_t ip_h_length;
 };
-
 
 typedef struct {
 	char* dev_;
@@ -39,83 +44,47 @@ bool parse(Param* param, int argc, char* argv[]) {
 	return true;
 }
 
-int parse_eth_h(const unsigned char* packet) {
-	// Mapping
-	struct eth_hdr* eth_h = (struct eth_hdr *)packet;
-
-	// Src MAC
-	printf("Source MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", 
-		eth_h -> ether_shost[0],
-		eth_h -> ether_shost[1],
-		eth_h -> ether_shost[2],
-		eth_h -> ether_shost[3],
-		eth_h -> ether_shost[4],
-		eth_h -> ether_shost[5]
+void print_packet(const unsigned char* packet, struct eth_hdr* eth, struct ipv4_hdr* ip, struct tcp_hdr* tcp, uint8_t offset) {
+	// Src Host
+	printf("Src Host: %02x:%02x:%02x:%02x:%02x:%02x\n", 
+		eth -> ether_shost[0],
+		eth -> ether_shost[1],
+		eth -> ether_shost[2],
+		eth -> ether_shost[3],
+		eth -> ether_shost[4],
+		eth -> ether_shost[5]
 	);
 
-	// Dst MAC
-	printf("Destination MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", 
-		eth_h -> ether_dhost[0],
-		eth_h -> ether_dhost[1],
-		eth_h -> ether_dhost[2],
-		eth_h -> ether_dhost[3],
-		eth_h -> ether_dhost[4],
-		eth_h -> ether_dhost[5]
+	// Dst Host
+	printf("Dst Host: %02x:%02x:%02x:%02x:%02x:%02x\n", 
+		eth -> ether_dhost[0],
+		eth -> ether_dhost[1],
+		eth -> ether_dhost[2],
+		eth -> ether_dhost[3],
+		eth -> ether_dhost[4],
+		eth -> ether_dhost[5]
 	);
+	
+	// Src IP
+	printf("Src IP: %s\n", inet_ntoa(ip -> ip_src));
 
-	// ether type이 ipv4가 아닐 경우 처리
-	uint16_t ether_type = ntohs(eth_h -> ether_type);
-	if (ether_type != IPv4_ETHERTYPE)
-	{
-		char *other_type;
-		if (ether_type == ARP_ETHERTYPE){
-			other_type = "ARP";
-		} else if (ether_type == IPv6_ETHERTYPE) {
-			other_type = "IPv6";
-		} else {
-			other_type = "Wrong Value";
-		}
-		
-		printf("⚠️ EtherType is not IPv4. EtherType: %s(0x%04x)\n", other_type, ether_type);
-		return -1;
+	// Dst IP
+	printf("Dst IP: %s\n", inet_ntoa(ip -> ip_dst));
+
+	// Src Port
+	printf("Src Port: %d\n", tcp -> th_sport);
+	
+	// Dst Port
+	printf("Dst Port: %d\n", tcp -> th_dport);
+
+	// Data
+	printf("Data: ");
+	for(int i = offset; i < offset + 20; i++) {
+		printf("%0x ", packet[i]);
 	}
-
-	return 0;
+	
+	printf("\n\n");
 }
-
-struct ip_result parse_ipv4_h(const unsigned char* packet) {
-	struct ipv4_hdr* ipv4_h = (struct ipv4_hdr *)(packet + 14);
-
-	printf("Source IP: %s\n", inet_ntoa(ipv4_h -> ip_src));
-	printf("Destination IP: %s\n", inet_ntoa(ipv4_h -> ip_dst));
-
-	uint8_t ip_protocol = ipv4_h -> ip_p;
-	int return_status;
-	if (ip_protocol != TCP_PROTOCOL)
-	{
-		return_status = false;
-
-		char *other_protocol;
-		if (ip_protocol == UDP_PROTOCOL){
-			other_protocol = "UDP";
-		} else {
-			other_protocol = "Wrong Protocol";
-		}
-		
-		printf("⚠️ Protcol is not TCP. Protocol: %s(0x%x)\n", other_protocol, ip_protocol);
-	}
-
-	return_status = true;
-	uint8_t ip_h_len = (ipv4_h -> ip_vhl) & 0x0F;
-	struct ip_result result = {return_status, ip_h_len * 4};
-
-	return result;
-}
-
-void parse_tcp_h(const unsigned char* packet, uint8_t offset) {
-	struct tcp_hdr* tcp_h = (struct tcp_hdr *)(packet + offset);
-}
-
 
 int main(int argc, char* argv[]) {
 	if (!parse(&param, argc, argv))
@@ -137,23 +106,35 @@ int main(int argc, char* argv[]) {
 			printf("pcap_next_ex return %d(%s)\n", res, pcap_geterr(pcap));
 			break;
 		}
-		printf("%u bytes captured\n", header->caplen);
 
-		// 1. eth header
-		if (parse_eth_h(packet) == -1){ continue; }
+		uint32_t total_len = header -> caplen;
+		uint8_t offset = 0;
+		
+		// 1. ethernet header
+		if (total_len < sizeof(struct eth_hdr)) continue; // 전체 길이 < ethernet header -> 패스
 
+		struct eth_hdr* ethernet = (struct eth_hdr *)packet;
+		
+		// ethertype이 ipv4가 아닐 경우 패스
+		if (ntohs(ethernet -> ether_type) != IPv4_ETHERTYPE) continue;
+		offset += sizeof(struct	eth_hdr);
 
 		// 2. ipv4 header
-		struct ip_result ip_result = parse_ipv4_h(packet);
-		if (!ip_result.success){ continue; }
-		
-		// TCP가 아닐 경우 종료
-		parse_tcp_h(packet, 14 + ip_result.ip_h_length);
-		
+		if (total_len - offset < IPv4_MIN_SIZE) continue; // 남은 길이 < IPv4 최소 길이 -> 패스
+
+		struct ipv4_hdr* ipv4 = (struct ipv4_hdr *)(packet + offset);
+		// protocol이 tcp가 아닐 경우 패스
+		if ((ipv4 -> ip_p) != TCP_PROTOCOL) continue;
+		offset += ((ipv4 -> ip_vhl) & 0x0F);
 
 		// 3. tcp header
+		if (total_len - offset < TCP_MIN_SIZE) continue; // 남은 길이 < TCP 최소 길이 -> 패스
 
-		// 4. data
+		struct tcp_hdr* tcp = (struct tcp_hdr *)(packet + offset);
+		offset += ((tcp -> th_x2off) & 0xF0);
+
+		// 4. print
+		print_packet(packet, ethernet, ipv4, tcp, offset);
 	}
 
 	pcap_close(pcap);

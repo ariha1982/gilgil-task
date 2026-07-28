@@ -67,15 +67,9 @@ struct tcp_hdr
     u_int16_t th_dport;       /* destination port */
     u_int32_t th_seq;          /* sequence number */
     u_int32_t th_ack;          /* acknowledgement number */
-#if (LIBNET_LIL_ENDIAN)
-    u_int8_t th_x2:4,         /* (unused) */
-           th_off:4;        /* data offset */
-#endif
-#if (LIBNET_BIG_ENDIAN)
-    u_int8_t th_off:4,        /* data offset */
-           th_x2:4;         /* (unused) */
-#endif
-    u_int8_t  th_flags;       /* control flags */
+
+    uint8_t th_x2off;       /* 상위 4비트: unused, 하위 4비트: data offset */
+    u_int8_t  th_flags;     /* control flags */
 #ifndef TH_FIN
 #define TH_FIN    0x01      /* finished send data */
 #endif
