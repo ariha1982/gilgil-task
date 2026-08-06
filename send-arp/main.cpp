@@ -108,6 +108,22 @@ EthArpPacket make_packet(pcap_t* handle, const Ip& src_ip, const Ip& t_ip,
 	return packet;
 }
 
+void printIp(const char* name, uint32_t networkOrderIp)
+{
+    uint32_t ip = ntohl(networkOrderIp);
+
+    printf(
+        "%s=%u.%u.%u.%u (raw=0x%08X, host=0x%08X)\n",
+        name,
+        (ip >> 24) & 0xFF,
+        (ip >> 16) & 0xFF,
+        (ip >> 8)  & 0xFF,
+        ip & 0xFF,
+        networkOrderIp,
+        ip
+    );
+}
+
 void send_arp_packet(pcap_t* handle, EthArpPacket& req_packet) {
 	if (pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&req_packet), sizeof(EthArpPacket)) != 0) {
 		fprintf(stderr, "pcap_sendpacket return error=%s\n", pcap_geterr(handle));
@@ -138,9 +154,9 @@ Mac get_mac_by_ip(pcap_t* handle, const Ip& s_ip, const Ip& src_ip, const Mac& s
 		const EthArpPacket* packet = reinterpret_cast<const EthArpPacket*>(data);
 
 		// validation(ethertype, src_ip, dst_ip)
-		if (packet->eth_.type_ != EthHdr::Arp) continue;
-		if (ntohs(packet->arp_.sip_) != s_ip) continue;
-		if (ntohs(packet->arp_.tip_) != src_ip) continue;
+		if (ntohs(packet->eth_.type_) != EthHdr::Arp) continue;
+		if (packet->arp_.sip() != s_ip) continue;
+		if (packet->arp_.tip() != src_ip) continue;
 
 		return packet->arp_.smac_;
 	}
@@ -174,9 +190,9 @@ int main(int argc, char* argv[]) {
 		Ip t_ip = Ip(argv[i]);
 		Ip s_ip = Ip(argv[i + 1]);
 
-		Mac s_mac = get_mac_by_ip(pcap, s_ip, src_ip, src_mac);
+		Mac t_mac = get_mac_by_ip(pcap, t_ip, src_ip, src_mac);
 
-		EthArpPacket packet = make_packet(pcap, src_ip, t_ip, src_mac, s_mac, s_mac, ArpHdr::Reply);
+		EthArpPacket packet = make_packet(pcap, s_ip, t_ip, src_mac, t_mac, t_mac, ArpHdr::Reply);
 		send_arp_packet(pcap, packet);
 	}
 
